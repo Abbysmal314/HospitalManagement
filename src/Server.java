@@ -3,40 +3,77 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
-import java.util.concurrent.Executors;
+import java.net.Socket;
 
 public class Server {
-    public void start(final int portNumber) {
-        try (var serverSocket = new ServerSocket(portNumber)){
-            System.out.println("Server started, Waiting for client on port " + portNumber);
 
-            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                while (true) {
-                    var clientSocket = serverSocket.accept();
-                    executor.submit(() -> {
+    // Port the server will listen on
+    private static final int PORT = 5000;
 
-                        System.out.println("Client connected");
-                        var clientIP = clientSocket.getInetAddress().getHostAddress();
-                        var clientPort = clientSocket.getPort();
+    // Start the server
+    public static void main(String[] args) {
 
-                        try (var clientInput = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-                             var writer = new PrintWriter(clientSocket.getOutputStream(), true);) {
-                            String inputLine;
-                            while ((inputLine = clientInput.readLine()) != null) {
-                                System.out.println(clientIP + ": " + clientPort + " : Received from client... " + inputLine);
-                                writer.println(new StringBuilder(inputLine).reverse());
-                            }
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
+        System.out.println("Server starting on port " + PORT + "...");
 
-                    });
-                }
+        // Open the server and wait for clients to connect
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+
+            System.out.println("Server is running. Waiting for clients...");
+
+            // Keep looping so the server can accept multiple clients
+            while (true) {
+
+                // Wait for a client to connect
+                Socket clientSocket = serverSocket.accept();
+                System.out.println("New client connected: " + clientSocket.getInetAddress());
+
+                // Spin up a new thread for this client so others aren't blocked
+                Thread clientThread = new Thread(() -> handleClient(clientSocket));
+                clientThread.start();
             }
 
         } catch (IOException e) {
-            throw new RuntimeException(e);
 
+            System.out.println("Server error: " + e.getMessage());
+        }
+    }
+
+    // Handles communication with a single connected client
+    private static void handleClient(Socket clientSocket) {
+
+        // Create one ClientHandler to route this client's requests to the database
+        ClientHandler handler = new ClientHandler();
+
+        try (BufferedReader input = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+             PrintWriter writer = new PrintWriter(clientSocket.getOutputStream(), true)) {
+
+            String requestLine;
+
+            // Keep reading requests from the client until they disconnect
+            while ((requestLine = input.readLine()) != null) {
+
+                System.out.println("Request received: " + requestLine);
+
+                // Send the request to ClientHandler and get the database response
+                String response = handler.handleRequest(requestLine);
+
+                // Replace newlines so the whole response sends as one line
+                writer.println(response.replace("\n", " | "));
+            }
+
+        } catch (IOException e) {
+
+            System.out.println("Client error: " + e.getMessage());
+
+        } finally {
+
+            // Always close the socket when the client disconnects
+            try {
+                clientSocket.close();
+                System.out.println("Client disconnected.");
+            } catch (IOException e) {
+                System.out.println("Error closing socket: " + e.getMessage());
+            }
         }
     }
 }
